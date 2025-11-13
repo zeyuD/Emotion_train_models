@@ -196,9 +196,9 @@ def train_model(model, train_loader, learning_rate=1e-4, max_grad_norm=1.0):
             
         # Print epoch statistics
         if total > 0:  # Avoid division by zero
-            print(f'Epoch: {epoch+1}  Loss: {running_loss/len(train_loader):.6f}  Accuracy: {correct*100/total:.3f}%')
+            print(f'Epoch: {epoch+1}  Loss: {running_loss/len(train_loader):.6f}  Accuracy: {correct*100/total:.3f}%\r', end='')
         else:
-            print(f'Epoch: {epoch+1}  Loss: {running_loss/len(train_loader) if len(train_loader) > 0 else 0:.6f}  Accuracy: 0.000%')
+            print(f'Epoch: {epoch+1}  Loss: {running_loss/len(train_loader) if len(train_loader) > 0 else 0:.6f}  Accuracy: 0.000%\r', end='')
 
 # Evaluation function
 def evaluate_model(model, test_loader, usernames):
@@ -233,20 +233,18 @@ def evaluate_model(model, test_loader, usernames):
         correct += (predicted == test_labels).sum().item()
         total += test_labels.size(0)
     
-    print(f'Correct: {correct}, Test accuracy: {100*correct/total:.3f}%')
-    
+    total_accuracy = 100 * correct / total if total > 0 else 0
+    print(f'Correct: {correct}, Test accuracy: {total_accuracy:.3f}%')
+
     # Get all predictions and true labels
     true_l = model.test_out.to('cpu')
     with torch.no_grad():
         pred_l = torch.max(model(model.test_in), 1)[1].to('cpu')
     
-    # Create confusion matrix
-    array = confusion_matrix(true_l, pred_l)
-    print('Confusion Matrix:')
-    print(array)
     
     # Get unique labels
     unique_labels = sorted(torch.unique(true_l).tolist())
+
     
     # Generate target names for classification report
     target_names = [usernames[i] for i in unique_labels]
@@ -254,20 +252,32 @@ def evaluate_model(model, test_loader, usernames):
     # Display classification report
     print('Classification Report:')
     print(classification_report(true_l, pred_l, target_names=target_names))
+
+
+    # Create confusion matrix
+    array = confusion_matrix(true_l, pred_l)
+    print('Confusion Matrix:')
     
     # Normalize confusion matrix for better visualization
-    array_norm = np.around(array.astype('float') / np.sum(array, axis=1)[:, None], decimals=2)
+    array_norm = np.around(array.astype('float') / np.sum(array, axis=1)[:, None], decimals=3)
+    print(array)
     
-    # Create dataframe for seaborn heatmap
+    # Create dataframe for seaborn heatmap with predicted on x-axis (columns) and true on y-axis (index)
     df_cm_norm = pd.DataFrame(
-        array_norm, 
-        index=[usernames[i] for i in unique_labels],
-        columns=[usernames[i] for i in unique_labels]
+        array_norm,
+        index=[usernames[i] for i in unique_labels],   # true labels -> y-axis
+        columns=[usernames[i] for i in unique_labels]  # predicted labels -> x-axis
     )
     
-    # Plot normalized confusion matrix
-    plt.figure(figsize=(10, 8))
-    sn.heatmap(df_cm_norm, annot=True, cmap='Blues')
-    plt.title('Normalized Confusion Matrix')
-    plt.ylabel('Predicted User')
-    plt.xlabel('True User')
+    # # Plot normalized confusion matrix (predicted on x, true on y)
+    # plt.figure(figsize=(6, 4))
+    # sn.heatmap(df_cm_norm, annot=True, cmap='Blues', fmt='.3f',
+    #            xticklabels=df_cm_norm.columns, yticklabels=df_cm_norm.index)
+    # plt.xlabel('Predicted Emotion')
+    # plt.ylabel('True Emotion')
+    # plt.tight_layout()
+
+
+    # plt.title('Confusion Matrix')
+
+    return correct, total, array

@@ -9,6 +9,7 @@ from sklearn.model_selection import train_test_split
 from model import CNN_network
 from functions.load_machine_config import load_machine_config
 from utils.data_loader import load_image_data
+import seaborn as sn
 
 config = load_machine_config()
 
@@ -123,7 +124,7 @@ work_directory = config["data_dir"] + "Emotion/"
 # Configure dataset parameters
 actuators = ["ur3e/joint/figures"]
 usernames = ["u0", "u2", "u3", "u4", "u5", "u7", "u8", "u9", "u10", "u11"]
-emotions = ["a", "j", "p", "s", "n"]
+emotions = ["a", "p", "s", "j", "n"]
 tasks = ["lw"]
 postures = ["free", "ref"]
 num_instances = 20 # situations that have no 20 instances will be skipped
@@ -133,68 +134,106 @@ emo_indices = {emotion: idx for idx, emotion in enumerate(emotions)}
 
 # Load data for all emos
 print("Loading data...")
-all_emo_data = []
 
 # For simplicity, using only first actuator and task
 actuator = actuators[0]
 username = usernames[0]
 task = tasks[0]
-posture = postures[0]
+posture = postures[1] # 0 for 'free' 1 for 'ref'
 
+all_user_correct = 0
+all_user_total = 0
+all_user_array = np.zeros((len(emotions), len(emotions)))
 for username in usernames:
+    all_emo_data = []
+
     for emotion in emotions:
         feature_data = load_image_data(
             work_directory, actuator, username, emotion, task, posture, num_instances
         )
         all_emo_data.append([feature_data, emotion])
 
-# Combine data from all emos
-X, Y = combine_all_emo_data(all_emo_data, emo_indices)
-print(f"Data loaded with shape X: {X.shape}, Y: {Y.shape}")
+    # Combine data from all emos
+    X, Y = combine_all_emo_data(all_emo_data, emo_indices)
+    print(f"Data loaded with shape X: {X.shape}, Y: {Y.shape}")
 
-# Apply global normalization to all data points collectively
-# X = normalize_all_data(X, method='zscore')  # Use 'minmax' for [0, 1] range
-# print(f"Data normalized globally using z-score method")
+    # Apply global normalization to all data points collectively
+    # X = normalize_all_data(X, method='zscore')  # Use 'minmax' for [0, 1] range
+    # print(f"Data normalized globally using z-score method")
 
-# Configure device (CPU or GPU)
-device = config["compdev"]
-print(f"Using device: {device}")
+    # Configure device (CPU or GPU)
+    device = config["compdev"]
+    print(f"Using device: {device}")
 
-# Split data into training and testing sets
-x_train, x_test, y_train, y_test = train_test_split(X, Y, test_size=0.5, random_state=42)
+    # Split data into training and testing sets
+    x_train, x_test, y_train, y_test = train_test_split(X, Y, test_size=0.5, random_state=42)
 
-# Convert to PyTorch tensors
-x_train = torch.from_numpy(x_train).float().to(device)
-x_test = torch.from_numpy(x_test).float().to(device)
-y_train = torch.from_numpy(y_train).long().to(device)
-y_test = torch.from_numpy(y_test).long().to(device)
+    # Convert to PyTorch tensors
+    x_train = torch.from_numpy(x_train).float().to(device)
+    x_test = torch.from_numpy(x_test).float().to(device)
+    y_train = torch.from_numpy(y_train).long().to(device)
+    y_test = torch.from_numpy(y_test).long().to(device)
 
-# Initialize CNN model
-input_size = 150  # time steps dimension
-cnn = CNN_network.CNNet(input_size, batch_size=8, num_class=len(emotions), epochs=20)
-cnn = cnn.to(device)
-print('Training device:', next(cnn.parameters()).device)
+    # Initialize CNN model
+    input_size = 150  # time steps dimension
+    cnn = CNN_network.CNNet(input_size, batch_size=8, num_class=len(emotions), epochs=100)
+    cnn = cnn.to(device)
+    print('Training device:', next(cnn.parameters()).device)
 
-# Prepare data loaders
-train_loader, test_loader = cnn.prepare_data_loaders(x_train, x_test, y_train, y_test)
+    # Prepare data loaders
+    train_loader, test_loader = cnn.prepare_data_loaders(x_train, x_test, y_train, y_test)
 
-# Train model
-print("Starting training...")
-start_time = time.time()
-CNN_network.train_model(cnn, train_loader)  # Renamed from 'fit'
-train_time = time.time()
-print(f"Training time used: {train_time-start_time:.2f} seconds")
+    # Train model
+    print("Starting training...")
+    start_time = time.time()
+    CNN_network.train_model(cnn, train_loader)  # Renamed from 'fit'
+    train_time = time.time()
+    print(f"Training time used: {train_time-start_time:.2f} seconds")
 
-# Evaluate model
-print("Evaluating model...")
-with torch.no_grad():
-    CNN_network.evaluate_model(cnn, test_loader, emotions)  # Renamed from 'eva'
-test_time = time.time()
-print(f"Testing time used: {test_time-train_time:.2f} seconds")
 
-# Save model
-model_save_path = os.path.join(work_directory, f"segments/{actuator}_{task}_{posture}_cnn.pt")
-torch.save(cnn, model_save_path)
-print(f"Model saved to {model_save_path}")
+    target_names = ["Annoyance", "Pleasure", "Sadness", "Joy", "Neutral"]
+    # Evaluate model
+    print("Evaluating model...")
+    with torch.no_grad():
+        correct, total, array = CNN_network.evaluate_model(cnn, test_loader, target_names)  # Renamed from 'eva'
+    all_user_correct += correct
+    all_user_total += total
+    all_user_array = all_user_array + array
+    test_time = time.time()
+    print(f"Testing time used: {test_time-train_time:.2f} seconds")
 
+    # Save model
+    model_save_path = os.path.join(work_directory, f"segments/{actuator}_{task}_{posture}_cnn.pt")
+    torch.save(cnn, model_save_path)
+    print(f"Model saved to {model_save_path}")
+
+    # plt.show()
+
+    # Report user-level accuracy
+    user_accuracy = 100 * correct / total if total > 0 else 0
+    print(f'User: {username}, Correct: {correct}, User accuracy: {user_accuracy:.3f}%')
+
+overall_accuracy = 100 * all_user_correct / all_user_total if all_user_total > 0 else 0
+print(f'Overall Correct: {all_user_correct}, Overall accuracy: {overall_accuracy:.3f}%')
+
+array_norm = np.around(all_user_array.astype('float') / np.sum(all_user_array, axis=1)[:, None], decimals=3)
+df_cm_norm = pd.DataFrame(
+        array_norm,
+        index=target_names,
+        columns=target_names
+    )
+print("Confusion Matrix (counts):")
+print(df_cm_norm)
+
+# Plot normalized confusion matrix (predicted on x, true on y)
+plt.figure(figsize=(6, 4))
+sn.heatmap(df_cm_norm, annot=True, cmap='Blues', fmt='.3f',
+            xticklabels=df_cm_norm.columns, yticklabels=df_cm_norm.index)
+plt.xlabel('Predicted Emotion')
+plt.ylabel('True Emotion')
+plt.tight_layout()
+
+
+plt.title('Confusion Matrix')
 plt.show()
+plt.savefig(f"results/{task}_{posture}_cnn_confusion_matrix.png")

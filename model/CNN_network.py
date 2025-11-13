@@ -17,44 +17,33 @@ class CNNet(nn.Module):
         self.batch_size = batch_size
         self.num_class = num_class
         self.epochs = epochs
-        self.time_steps = time_steps  # 41 in your case
-        self.feature_dim = 6  # Fixed feature dimension from your data
+        self.time_steps = time_steps
+        self.feature_dim = 150
         
-        # Calculate output sizes after convolutions and pooling
-        # For time series data, we typically apply convolutions across time
-        # Using a kernel of size 3 reduces dimension by 2
-        # Max pooling with size 2 reduces dimension by factor of 2
+        # # Dynamically calculate the final feature size
+        # time_after_conv1 = time_steps - 2  # kernel_size=3
+        # time_after_pool1 = time_after_conv1 // 2  # max_pool size=2
+        # time_after_conv2 = time_after_pool1 - 2  # kernel_size=3
+        # time_after_pool2 = time_after_conv2 // 2  # max_pool size=2
+        # time_after_conv3 = time_after_pool2 - 2  # kernel_size=3 
+        # time_after_pool3 = time_after_conv3 // 2  # max_pool size=2
         
-        # First conv: 41 -> 39
-        # First pool: 39 -> 19
-        # Second conv: 19 -> 17
-        # Second pool: 17 -> 8
-        # Third conv: 8 -> 6
-        # Third pool: 6 -> 3
-        
-        # Dynamically calculate the final feature size
-        time_after_conv1 = time_steps - 2  # kernel_size=3
-        time_after_pool1 = time_after_conv1 // 2  # max_pool size=2
-        time_after_conv2 = time_after_pool1 - 2  # kernel_size=3
-        time_after_pool2 = time_after_conv2 // 2  # max_pool size=2
-        time_after_conv3 = time_after_pool2 - 2  # kernel_size=3 
-        time_after_pool3 = time_after_conv3 // 2  # max_pool size=2
-        
-        self.final_time_dim = max(1, time_after_pool3)  # Ensure at least 1
+        # self.final_time_dim = max(1, time_after_pool3)  # Ensure at least 1
         
         # Define model layers - adapted for time series data
-        # Input shape: [batch_size, 1, time_steps, feature_dim]
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=(3, 3), padding=(0, 1))
+        # Input shape: [batch_size, 3, time_steps, feature_dim]
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=(3, 3), padding=(0, 1))
         self.conv2 = nn.Conv2d(32, 64, kernel_size=(3, 3), padding=(0, 1))
         self.conv3 = nn.Conv2d(64, 128, kernel_size=(3, 3), padding=(0, 1))
         
         # Calculate the flattened size for the fully connected layer
         # After 3 conv layers and 3 pooling layers
-        self.flattened_size = 128 * self.final_time_dim * self.feature_dim
+        # self.flattened_size = 128 * self.final_time_dim * self.feature_dim
+        self.flattened_size = 128 * 4 * 5
         
         # Fully connected layers
-        self.fc1 = nn.Linear(self.flattened_size, 512)
-        self.fc2 = nn.Linear(512, 256)
+        self.fc1 = nn.Linear(self.flattened_size, 256)
+        self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, 128)
         self.fc4 = nn.Linear(128, num_class)
         
@@ -68,31 +57,32 @@ class CNNet(nn.Module):
     def forward(self, x):
         # x shape: [batch_size, 1, time_steps, feature_dim]
         # Ensure input is properly shaped with channel dimension
-        if x.dim() == 3:
-            # If input is [batch_size, time_steps, feature_dim]
-            x = x.unsqueeze(1)
+        # if x.dim() == 3:
+        #     # If input is [batch_size, time_steps, feature_dim]
+        #     x = x.unsqueeze(1)
         
         # Apply convolutions
-        x = F.relu(self.conv1(x))
-        x = F.max_pool2d(x, kernel_size=(2, 1))  # Pool over time dimension only
+        x = F.max_pool2d(self.conv1(x), kernel_size=3) 
+        x = F.relu(x)
+        # x = self.dropout(x)
+        
+        x = F.max_pool2d(self.conv2(x), kernel_size=3) 
+        x = F.relu(x)
         x = self.dropout(x)
         
-        x = F.relu(self.conv2(x))
-        x = F.max_pool2d(x, kernel_size=(2, 1))  # Pool over time dimension only
-        x = self.dropout(x)
-        
-        x = F.relu(self.conv3(x))
-        x = F.max_pool2d(x, kernel_size=(2, 1))  # Pool over time dimension only
-        x = self.dropout(x)
+        x = F.max_pool2d(self.conv3(x), kernel_size=3)
+        x = F.relu(x)
+        # x = self.dropout(x)
         
         # Flatten for fully connected layers
+        # print(x.shape) [8, 128, 4, 5]
         x = x.view(-1, self.flattened_size)
         
         # Apply fully connected layers
         x = F.relu(self.fc1(x))
-        x = self.dropout(x)
+        # x = self.dropout(x)
         x = F.relu(self.fc2(x))
-        x = self.dropout(x)
+        # x = self.dropout(x)
         x = F.relu(self.fc3(x))
         x = self.fc4(x)
         

@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import pandas as pd
+from torchvision.io import read_image
 
 def load_feature_data(work_directory, sessionname, tablename, username, fingername, featurename, num_instances):
     feature_data = []
@@ -43,3 +44,57 @@ def prepare_user_verification_data(target_data, all_user_finger_data, target_key
     X = np.array(genuine + impostor)
     y = np.concatenate([genuine_labels, impostor_labels])
     return X, y
+
+
+
+def load_image_data(work_directory, actuator, username, emotion, task, posture, num_instances):
+    """
+    Load image from png files.
+    No image-wise normalization is applied at this stage.
+    
+    Args:
+        work_directory (str): Base directory path
+        actuator (str): Name of the actuator
+        emotion (str): Name of the emotion
+        task (str): Name of the task
+        posture (str): Name of the posture
+        num_instances (int): Number of instances to load
+        
+    Returns:
+        list: List of loaded image matrices
+    """
+    image_data = []
+    
+    for idx in range(1, num_instances+1):
+        file_path = os.path.join(
+            work_directory,
+            "segments",
+            actuator
+        ) + "/" + username + "_" + emotion + "_" + task + "_" + posture + "_" + str(idx) + ".png"
+        
+        try:
+            # Load image data (150 × 150 RGB)
+            data = read_image(file_path)
+            if data.shape[0] == 4:
+                data = data[:3, :, :]  # Discard alpha channel
+                # data = data.permute(1, 2, 0)  # Permute to (H, W, C) for displaying
+            
+            # # Replace NaN values with zeros
+            # data = np.nan_to_num(data, nan=0.0)
+            
+            # Check for valid data
+            if np.isfinite(data).all():
+                image_data.append(data)
+            else:
+                print(f"Warning: Non-finite values found in {file_path}")
+                data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
+                image_data.append(data)
+                
+        # except FileNotFoundError:
+        #     print(f"Warning: File not found: {file_path}")
+        #     continue
+        except Exception as e:
+            # print(f"Error loading file {file_path}: {e}")
+            continue
+            
+    return image_data

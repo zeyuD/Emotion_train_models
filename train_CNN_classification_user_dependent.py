@@ -124,8 +124,11 @@ work_directory = config["data_dir"] + "Emotion/"
 # Configure dataset parameters
 actuators = ["ur3e/joint/figures"]
 usernames = ["u0", "u2", "u3", "u4", "u5", "u7", "u8", "u9", "u10", "u11"]
+usernames_all_tasks = ["u2", "u7", "u8", "u9"]
 emotions = ["a", "p", "s", "j", "n"]
 tasks = ["lw"]
+free_tasks = ["lw", "drink", "knock", "s", "star", "stir", "throw", "tri", "wave"]
+ref_tasks = ["lw", "s", "star", "stir", "tri"]
 postures = ["free", "ref"]
 num_instances = 20 # situations that have no 20 instances will be skipped
 
@@ -137,13 +140,13 @@ print("Loading data...")
 
 # For simplicity, using only first actuator and task
 actuator = actuators[0]
-username = usernames[0]
 task = tasks[0]
 posture = postures[1] # 0 for 'free' 1 for 'ref'
 
 all_user_correct = 0
 all_user_total = 0
 all_user_array = np.zeros((len(emotions), len(emotions)))
+
 for username in usernames:
     all_emo_data = []
 
@@ -192,6 +195,7 @@ for username in usernames:
 
 
     target_names = ["Annoyance", "Pleasure", "Sadness", "Joy", "Neutral"]
+    # target_names = ["Annoyance", "Joy", "Sadness", "Pleasure", "Neutral"]
     # Evaluate model
     print("Evaluating model...")
     with torch.no_grad():
@@ -203,7 +207,7 @@ for username in usernames:
     print(f"Testing time used: {test_time-train_time:.2f} seconds")
 
     # Save model
-    model_save_path = os.path.join(work_directory, f"segments/{actuator}_{task}_{posture}_cnn.pt")
+    model_save_path = os.path.join(work_directory, f"segments/{actuator}/{task}_{posture}_cnn.pt")
     torch.save(cnn, model_save_path)
     print(f"Model saved to {model_save_path}")
 
@@ -222,6 +226,22 @@ df_cm_norm = pd.DataFrame(
         index=target_names,
         columns=target_names
     )
+
+# Generate a classification report with precision, recall, f1-score
+classification_report = pd.DataFrame(columns=['Precision', 'Recall', 'F1-Score'])
+for i, emotion in enumerate(target_names):
+    true_positives = all_user_array[i, i]
+    false_positives = np.sum(all_user_array[:, i]) - true_positives
+    false_negatives = np.sum(all_user_array[i, :]) - true_positives
+    
+    precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+    recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
+    f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    
+    classification_report.loc[emotion] = [round(precision, 3), round(recall, 3), round(f1_score, 3)]
+print("Classification Report:")
+print(classification_report)
+
 print("Confusion Matrix (counts):")
 print(df_cm_norm)
 

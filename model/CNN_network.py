@@ -196,9 +196,15 @@ def train_model(model, train_loader, learning_rate=1e-4, max_grad_norm=1.0):
             
         # Print epoch statistics
         if total > 0:  # Avoid division by zero
-            print(f'Epoch: {epoch+1}  Loss: {running_loss/len(train_loader):.6f}  Accuracy: {correct*100/total:.3f}%\r', end='')
+            if epoch + 1 < model.epochs:
+                print(f'Epoch: {epoch+1}  Loss: {running_loss/len(train_loader):.6f}  Accuracy: {correct*100/total:.3f}%\r', end='')
+            else:
+                print(f'Epoch: {epoch+1}  Loss: {running_loss/len(train_loader):.6f}  Accuracy: {correct*100/total:.3f}%')
         else:
-            print(f'Epoch: {epoch+1}  Loss: {running_loss/len(train_loader) if len(train_loader) > 0 else 0:.6f}  Accuracy: 0.000%\r', end='')
+            if epoch + 1 < model.epochs:
+                print(f'Epoch: {epoch+1}  Loss: {running_loss/len(train_loader) if len(train_loader) > 0 else 0:.6f}  Accuracy: 0.000%\r', end='')
+            else:
+                print(f'Epoch: {epoch+1}  Loss: {running_loss/len(train_loader) if len(train_loader) > 0 else 0:.6f}  Accuracy: 0.000%')
 
 # Evaluation function
 def evaluate_model(model, test_loader, usernames):
@@ -217,10 +223,12 @@ def evaluate_model(model, test_loader, usernames):
     total = 0
     predict_label = []
     true_label = []
+    predict_probs = []
     
     for test_inputs, test_labels in test_loader:
         # Forward pass
         outputs = model(test_inputs)
+        # print("Output of CNN:", outputs)
         
         # Get predictions
         predicted = torch.max(outputs, 1)[1]
@@ -232,6 +240,10 @@ def evaluate_model(model, test_loader, usernames):
         # Calculate accuracy
         correct += (predicted == test_labels).sum().item()
         total += test_labels.size(0)
+
+        # Prepare for a calibration curve
+        # convert to probabilities
+        predict_probs.append(F.softmax(outputs, dim=1))
     
     total_accuracy = 100 * correct / total if total > 0 else 0
     print(f'Correct: {correct}, Test accuracy: {total_accuracy:.3f}%')
@@ -280,4 +292,69 @@ def evaluate_model(model, test_loader, usernames):
 
     # plt.title('Confusion Matrix')
 
-    return correct, total, array
+    # Extract all probabilities and labels for calibration curve
+    all_probs = torch.cat(predict_probs, dim=0).to('cpu')
+    # Re-calculate by all output classes so sum is 1
+    all_probs = all_probs / all_probs.sum(dim=1, keepdim=True)
+
+    # print("All probs shape:", all_probs.shape)
+    # print("All probs:", all_probs)
+    all_labels = torch.cat(true_label, dim=0).to('cpu')
+    # print("All labels shape:", all_labels.shape)
+    # print("All labels:", all_labels)
+    all_preds = torch.cat(predict_label, dim=0).to('cpu')
+    true_class_probs = all_probs[torch.arange(len(all_labels)), all_labels]
+    # print("True class probabilities:", true_class_probs)
+
+    # Compute calibration bins
+    num_bins = 5
+    bin_edges = np.linspace(0, 1, num_bins + 1)
+    bin_lowers = bin_edges[:-1]
+    bin_uppers = bin_edges[1:]
+
+    probs = true_class_probs.numpy()
+    preds = all_preds.numpy()
+    labels = all_labels.numpy()
+
+    bin_confidences = []
+    bin_accuracies = []
+    bin_counts = []
+
+    for bin_lower, bin_upper in zip(bin_lowers, bin_uppers):
+        in_bin = (probs > bin_lower) & (probs <= bin_upper)
+        prop_in_bin = in_bin.sum()
+        if prop_in_bin > 0:
+            # mean confidence of samples in this bin
+            avg_conf = probs[in_bin].mean()
+            # accuracy of samples in this bin
+            acc = (preds[in_bin] == labels[in_bin]).mean()
+            print("Bin ({:.2f}, {:.2f}]: Count = {}, Avg Conf = {:.3f}, Acc = {:.3f}".format(
+                bin_lower, bin_upper, prop_in_bin, avg_conf, acc))
+        else:
+            print("No samples in bin ({:.2f}, {:.2f}]".format(bin_lower, bin_upper))
+            avg_conf = np.nan
+            acc = np.nan
+        bin_confidences.append(avg_conf)
+        bin_accuracies.append(acc)
+        bin_counts.append(prop_in_bin)
+
+    bin_confidences = np.array(bin_confidences)
+    bin_accuracies = np.array(bin_accuracies)
+    bin_counts = np.array(bin_counts)
+
+    # Plot calibration curve
+    # mask = ~np.isnan(bin_accuracies)
+    # plt.figure(figsize=(6, 4))
+    # # Perfectly calibrated line
+    # plt.plot([0, 1], [0, 1], linestyle='--', color='gray')
+    # # Calibration curve
+    # plt.plot(bin_confidences[mask], bin_accuracies[mask], marker='o', label='CNN (5-class emotion)')
+
+    # plt.xlabel('Predicted probability')
+    # plt.ylabel('Empirical accuracy')
+    # plt.title('Calibration Curve (Reliability Diagram)')
+    # plt.legend()
+    # plt.grid(True)
+    # plt.show()
+
+    return correct, total, array, bin_confidences, bin_accuracies, bin_counts
